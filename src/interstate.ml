@@ -1,4 +1,31 @@
 open! Core
+module Location = String
+(* We separate out the [Network] module to represent our highway connections in OCaml types. *)
+module Network = struct
+  (* We can represent our interstate as a set of connections, where a connection
+     represents a road between two places. *)
+  module Connection = struct
+    module T = struct
+      type t = Location.t * Location.t [@@deriving compare, sexp]
+    end
+
+  type t = Connection.Set.t [@@deriving sexp_of]
+
+let of_file input_file =
+  let connections =
+    In_channel.read_lines (File_path.to_string input_file)
+    |> List.concat_map ~f:(fun s ->
+      match Connection.of_string s with
+      | Some (a, b) ->
+        (* Friendships are mutual; a connection between a and b means we should also
+           consider the connection between b and a. *)
+        [ a, b; b, a ]
+      | None ->
+        printf "ERROR: Could not parse line as connection; dropping. %s\n" s;
+        [])
+  in
+  Connection.Set.of_list connections
+;;
 
 let load_command =
   let open Command.Let_syntax in

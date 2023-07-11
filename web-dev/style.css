@@ -3,4 +3,14 @@ body {
     margin: auto;
     background: #FAFAFA;
     font-family: Helvetica;
+    background-color: gainsboro;
+}
+div {
+    margin:auto;
+    width:600px;
+    height:800px;
+    border:15px solid black;
+    background-color: red;
+    padding:10px;
+    text-align:center;
 }
