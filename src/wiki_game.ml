@@ -1,5 +1,7 @@
 open! Core
 
+let ( >> ) f g x = f x |> g
+
 (* [get_linked_articles] should return a list of wikipedia article lengths
    contained in the input.
 
@@ -19,14 +21,22 @@ let get_linked_articles contents : string list =
   parse contents
   $$ "a[href]"
   |> filter (fun link ->
-       R.attribute "href" link |> String.is_substring ~substring:"wiki")
+       R.attribute "href" link |> String.is_substring ~substring:"wiki/")
   |> filter (fun link ->
        to_string link
        |> Wikipedia_namespace.namespace
        |> function None -> true | Some _ -> false)
   |> to_list
-  |> List.map ~f:(fun li ->
-       texts li |> String.concat ~sep:"" |> String.strip)
+  |> List.map ~f:(fun li -> R.attribute "href" li)
+  |> List.dedup_and_sort ~compare:String.compare
+;;
+
+let format =
+  String.chop_prefix_if_exists ~prefix:"/"
+  >> String.chop_prefix_if_exists ~prefix:"wiki/"
+  >> String.lstrip
+  >> (String.tr_multi ~target:"-/()*" ~replacement:"_____" |> Staged.unstage)
+  >> String.lstrip ?drop:None
 ;;
 
 let print_links_command =
@@ -40,17 +50,62 @@ let print_links_command =
         List.iter (get_linked_articles contents) ~f:print_endline]
 ;;
 
+(* In order to visualize the social network, we use the ocamlgraph library to
+   create a [Graph] structure whose vertices are of type [Person.t].
+
+   The ocamlgraph library exposes lots of different ways to construct
+   different types of graphs. Take a look at
+   https://github.com/backtracking/ocamlgraph/blob/master/src/imperative.mli
+   for documentation on other types of graphs exposed by this API. *)
+module G = Graph.Imperative.Graph.Concrete (String)
+
+(* We extend our [Graph] structure with the [Dot] API so that we can easily
+   render constructed graphs. Documentation about this API can be found here:
+   https://github.com/backtracking/ocamlgraph/blob/master/src/dot.mli *)
+module Dot = Graph.Graphviz.Dot (struct
+  include G
+
+  (* These functions can be changed to tweak the appearance of the generated
+     graph. Check out the ocamlgraph graphviz API
+     (https://github.com/backtracking/ocamlgraph/blob/master/src/graphviz.mli)
+     for examples of what values can be set here. *)
+  let edge_attributes _ = [ `Dir `Forward ]
+  let default_edge_attributes _ = []
+  let get_subgraph _ = None
+  let vertex_attributes v = [ `Shape `Box; `Label v; `Fillcolor 1000 ]
+  let vertex_name v = v
+  let default_vertex_attributes _ = []
+  let graph_attributes _ = []
+end)
+
+let rec linker ~depth ~origin ~how_to_fetch =
+  if depth <> 0
+  then (
+    let contents = File_fetcher.fetch_exn how_to_fetch ~resource:origin in
+    let links = get_linked_articles contents in
+    List.concat_map links ~f:(fun link ->
+      [ format origin, format link ]
+      @ linker ~depth:(depth - 1) ~origin:link ~how_to_fetch))
+  else []
+;;
+
 (* [visualize] should explore all linked articles up to a distance of
    [max_depth] away from the given [origin] article, and output the result as
    a DOT file. It should use the [how_to_fetch] argument along with
    [File_fetcher] to fetch the articles so that the implementation can be
    tested locally on the small dataset in the ../resources/wiki directory. *)
 let visualize ?(max_depth = 3) ~origin ~output_file ~how_to_fetch () : unit =
-  ignore (max_depth : int);
-  ignore (origin : string);
-  ignore (output_file : File_path.t);
-  ignore (how_to_fetch : File_fetcher.How_to_fetch.t);
-  failwith "TODO"
+  let graph = G.create () in
+  let total_links =
+    linker ~depth:max_depth ~origin ~how_to_fetch
+    |> List.dedup_and_sort ~compare:[%compare: string * string]
+  in
+  List.iter total_links ~f:(fun (link1, link2) ->
+    G.add_edge graph link1 link2);
+  Dot.output_graph
+    (Out_channel.create (File_path.to_string output_file))
+    graph;
+  printf !"Done! Wrote dot file to %{File_path}/n%!" output_file
 ;;
 
 let visualize_command =
