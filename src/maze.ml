@@ -71,7 +71,7 @@ let rec dfs ~maze ~start ~path =
       let paths =
         List.filter
           (List.map neighbors ~f:(fun pos ->
-             dfs ~maze ~start:pos ~path @ [ start ]))
+             dfs ~maze ~start:pos ~path:(path @ [ start ])))
           ~f:(fun possible_path -> List.length possible_path > 0)
       in
       if List.length paths = 0 then [] else List.hd_exn paths)
